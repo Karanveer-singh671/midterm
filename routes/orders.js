@@ -3,10 +3,10 @@
 const express = require('express');
 const router  = express.Router();
 const twilio = require('twilio');
-const client = require('twilio')('ACd653fcd7492c6b800652c1d0e52f8bc2', 'be46e5d7feca518f58e24777507cdeea');
+const client = require('twilio')('AC0945be5576dc3b770424a16a6ac748e7', '73304938e2cff076c3f2c4342b1aa6ba');
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const restaurantNumber = '+17789902233';
-const twilioNumber = '+16046708301';
+const twilioNumber = '+16046708224';
 
 
 module.exports = (knex) => {
@@ -18,16 +18,45 @@ module.exports = (knex) => {
    * @param  {[String]} message Message body
    */
   function sendSMS(to, message){
+    console.log("Sending text to: " + to);
     client.messages.create({
       from: twilioNumber,
       to: to,
       body: message
-    }, (error, message) => {
-      console.log('Sent message... i hope');
-    });
+    }, (error, message) => {});
   }
 
+  /**
+   * Changes the price of menu items based off parameters passed to it
+   * @param  {STRING} item   'B' is Burger, 'F' is fries, 'S' is shakes
+   * @param  {[INTEGER]} amount New Price
+   */
+  function changePrice(item, amount){
+    console.log('Change price function run');
+    if (item === 'B'){
+      console.log('Updating burger amount');
+      knex('menu_items')
+        .where('name', 'Hamburger')
+        .update({price: Number(amount)})
+        .then(()=>{});
+    } else if (item === 'F') {
+      console.log('Updating fries amount');
+      knex('menu_items')
+        .where('name', 'Fries')
+        .update({price: Number(amount)})
+        .then(()=>{});
+    } else if (item === 'S') {
+      console.log('Updating shakes amount');
+      knex('menu_items')
+        .where('name', 'Shakes')
+        .update({price: Number(amount)})
+        .then(()=>{});
+    } else {
+      console.log("error!");
+    }
+  }
 
+  //Redircts to the orderinfo.ejs page which provides the customer with order info
   router.get('/:id', (req, res) => {
     knex.select('orders.id', 'menu_items.name', 'ordered_items.quantity', 'menu_items.price', 'orders.wait_time', 'ordered_items.paid_price')
       .from('orders')
@@ -39,9 +68,7 @@ module.exports = (knex) => {
         for(let i = 0; i < results.length; i ++){
           totalPrice += results[i]['paid_price'];
         }
-        // console.log('Total Price: ' + totalPrice);
-        res.render('orderinfo', {order: results, totalPrice: totalPrice});
-        // res.json(results);
+        return res.render('orderinfo', {order: results, totalPrice: totalPrice});
       });
   });
 
@@ -54,36 +81,44 @@ module.exports = (knex) => {
       .innerJoin('menu_items', 'menu_item_id', 'menu_items.id')
       .then((results) => {
         res.json(results);
-    });
+      });
   });
 
+  //Submitting a new order
   router.post('/', (req, res) => {
-    console.log('Getting post request...');
-    console.log('burgers: ' + req.body.burgers);
-    console.log('fries: ' + req.body.fries);
-    console.log('shakes: ' + req.body.shakes);
-
     knex
-      .select('price')
+      .select('name', 'price')
       .from('menu_items')
+      //Getting current prices from the menu_items table
       .then((prices) =>{
-
-        // console.log("rohit");
-        // for(var i = 0; i<price.length; i++){
-        //   console.log("price :"+price[i].price);
-        // }
-        // console.log(JSON.stringify(price));
-        // const prices = JSON.stringify(price);
-        const burgersPrice = prices[0]['price'];
-        const friesPrice = prices[1]['price'];
-        const shakesPrice = prices[2]['price'];
+        let burgersPrice = 0;
+        let friesPrice = 0;
+        let shakesPrice = 0;
+        //Setting prices
+        for(var i = 0; i < prices.length; i ++){
+          if(prices[i]['name'] === 'Hamburger'){
+            burgersPrice = prices[i]['price'];
+          } else if(prices[i]['name'] === 'Fries'){
+            friesPrice = prices[i]['price'];
+          } else if(prices[i]['name'] === 'Shakes'){
+            shakesPrice = prices[i]['price'];
+          } else {
+            console.log('Error!');
+          }
+        }
         const burgersQuantity = req.body.burgers;
         const friesQuantity = req.body.fries;
         const shakesQuantity = req.body.shakes;
-        // console.log('Prices: ' + burgerPrice, friesPrice, shakePrice);
-
+        //Checking if the customer has left any notes for the restaurant
+        let customerNotes = '';
+        if(!req.body.notes){
+          customerNotes = null;
+        } else {
+          customerNotes = req.body.notes;
+        }
+        //updating DB
         knex
-          .insert({user_id: 1, wait_time: null})
+          .insert({user_id: 1, wait_time: null, customer_notes: customerNotes})
           .into('orders')
           .returning('id')
           .then(order_id => {
@@ -112,17 +147,23 @@ module.exports = (knex) => {
               resolve(order_id);
             });
           }).then((order_id) => {
+            //Notifying restaurant of new order (msg depends if there is a note or not)
             console.log('about to send text message');
-            sendSMS(restaurantNumber, `Order ID ${order_id} Burgers ${req.body.burgers} Fries ${req.body.fries} Shakes ${req.body.shakes}`);
+            if(!customerNotes){
+              sendSMS(restaurantNumber, `Order ID ${order_id} Burgers ${burgersQuantity} Fries ${friesQuantity} Shakes ${shakesQuantity}`);
+            } else{
+              sendSMS(restaurantNumber, `Order ID ${order_id} Burgers ${burgersQuantity} Fries ${friesQuantity} Shakes ${shakesQuantity} Customer notes: ${customerNotes}`);
+            }
+            //Getting customer phone # and notifying customer
             knex.select('phone_number')
-                .from('users')
-                .where('orders.id', Number(order_id))
-                .innerJoin('orders', 'users.id', 'orders.user_id')
-                .then((result) => {
-                  const customerPhoneNumber = '+' + result[0]['phone_number'];
-                  // console.log('Phone number ' + customerPhoneNumber);
-                  sendSMS(customerPhoneNumber, `Your order id is: ${order_id}`);
-                });
+              .from('users')
+              .where('orders.id', Number(order_id))
+              .innerJoin('orders', 'users.id', 'orders.user_id')
+              .then((result) => {
+                const customerPhoneNumber = '+' + result[0]['phone_number'];
+                // console.log('Phone number ' + customerPhoneNumber);
+                sendSMS(customerPhoneNumber, `Your order id is: ${order_id}`);
+              });
 
             res.json(order_id);
           })
@@ -135,36 +176,39 @@ module.exports = (knex) => {
 
   /**
    * Recieving an SMS message from the restaurant.
-   * Message format MUST be in the format of '<order di> <wait time>'
-   * Wait
+   * If providing wait time or rdy nodification MUST be in the format of '<order id> <wait time>'
+   * If updating new price, notification MUST be in the format of <b/f/s> <price>
+   * Only recieves messages from restaurant phone.
    */
   router.post('/SMS', (req, res) => {
-    console.log('Recieving SMS message');
-    // const twiml = new MessagingResponse();
     const body = req.body['Body'].split(' ');
-    console.log('ID: ' + body[0] + ' Time: ' + body[1]);
     const orderID = body[0];
     const waitTime = body[1];
     let message = 'Default message';
-
-
+    //Checking if we're getting a message from the restaurant
+    if(req.body.From !== restaurantNumber){
+      console.log('Access denied, unknown number');
+    }
+    //Messages routed here if the restaurant owner wants to change the price of the products
+    if(orderID === 'B' || orderID === 'F' || orderID === 'S'){
+      changePrice(orderID, waitTime);
+      return;
+    }
     //Checking message format
-    if( (body[1] === undefined) || (isNaN(body[0])) ){
+    if((waitTime === undefined || isNaN(orderID) || isNaN(waitTime))){
       sendSMS(restaurantNumber, 'Incorrect message format: please send messages like <ORDER ID> <Wait time/Ready>');
       return;
     }
-
     knex
       .select('*')
       .where({id: Number(orderID)})
       .from('orders')
       .then((result) =>{
-        console.log("Result: ", result);
-        //Checks if the order exists in the DB
+        //Checks if the order exists in the DB. Sends error message if not
         if(result.length === 0){
           sendSMS(restaurantNumber, 'Error: Order does not exist');
+        //If order is ready, set wait time to 0 and notify customer
         } else if (waitTime === 'ready'){
-          console.log('Message is: ', message);
           knex('orders')
             .where('id', orderID)
             .update({wait_time: 0})
@@ -179,6 +223,7 @@ module.exports = (knex) => {
                   sendSMS(customerPhoneNumber, `Your order: ${orderID} is ready to pickup.`);
                 });
             });
+        //Set wait time to what the owner has provided and notify customer
         } else {
           console.log('Message is: ', message);
           knex('orders')
@@ -197,7 +242,7 @@ module.exports = (knex) => {
             });
           res.sendStatus(200);
         }
-      })
+      });
 
   });
   return router;
