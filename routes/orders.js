@@ -33,7 +33,7 @@ module.exports = (knex) => {
     //Error checking to see if we recieved data in the right format
     if (amount < 0){
       sendSMS(restaurantNumber, 'Amount cannot be less than 0!');
-    else if(isNaN(amount)){
+    } else if(isNaN(amount)){
       sendSMS(restaurantNumber, 'Error! No new price provided!');
     } else if (item === 'B'){
       console.log('Updating burger amount');
