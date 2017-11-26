@@ -3,14 +3,13 @@
 const express = require('express');
 const router  = express.Router();
 const twilio = require('twilio');
-const client = require('twilio')('AC0945be5576dc3b770424a16a6ac748e7', '73304938e2cff076c3f2c4342b1aa6ba');
+const client = require('twilio')(process.env.TWILIOACCOUNTSID, process.env.TWILIOAUTHTOKEN);
 const MessagingResponse = twilio.twiml.MessagingResponse;
-const restaurantNumber = '+17789902233';
-const twilioNumber = '+16046708224';
+const restaurantNumber = process.env.RESTAURANTNUMBER;
+const twilioNumber = process.env.TWILIONUMBER;
 
 
 module.exports = (knex) => {
-
 
   /**
    * Sends a text message
@@ -18,7 +17,6 @@ module.exports = (knex) => {
    * @param  {[String]} message Message body
    */
   function sendSMS(to, message){
-    console.log("Sending text to: " + to);
     client.messages.create({
       from: twilioNumber,
       to: to,
@@ -32,8 +30,12 @@ module.exports = (knex) => {
    * @param  {[INTEGER]} amount New Price
    */
   function changePrice(item, amount){
-    console.log('Change price function run');
-    if (item === 'B'){
+    //Error checking to see if we recieved data in the right format
+    if (amount < 0){
+      sendSMS(restaurantNumber, 'Amount cannot be less than 0!');
+    else if(isNaN(amount)){
+      sendSMS(restaurantNumber, 'Error! No new price provided!');
+    } else if (item === 'B'){
       console.log('Updating burger amount');
       knex('menu_items')
         .where('name', 'Hamburger')
@@ -52,7 +54,7 @@ module.exports = (knex) => {
         .update({price: Number(amount)})
         .then(()=>{});
     } else {
-      console.log("error!");
+      sendSMS(restaurantNumber, 'Error! Item not found!');
     }
   }
 
@@ -147,7 +149,7 @@ module.exports = (knex) => {
               resolve(order_id);
             });
           }).then((order_id) => {
-            //Notifying restaurant of new order (msg depends if there is a note or not)
+            //Notifying restaurant of new order (msg depends if there is a customer note or not)
             console.log('about to send text message');
             if(!customerNotes){
               sendSMS(restaurantNumber, `Order ID ${order_id} Burgers ${burgersQuantity} Fries ${friesQuantity} Shakes ${shakesQuantity}`);
@@ -195,7 +197,7 @@ module.exports = (knex) => {
       return;
     }
     //Checking message format
-    if((waitTime === undefined || isNaN(orderID) || isNaN(waitTime))){
+    if(waitTime === undefined || isNaN(orderID) || (isNaN(waitTime) && waitTime !== 'ready') || waitTime < 1){
       sendSMS(restaurantNumber, 'Incorrect message format: please send messages like <ORDER ID> <Wait time/Ready>');
       return;
     }
@@ -243,7 +245,6 @@ module.exports = (knex) => {
           res.sendStatus(200);
         }
       });
-
   });
   return router;
 };
